@@ -10,4 +10,5 @@ import org.springframework.validation.annotation.Validated;
 public record RateLimitProperties(
         @Min(1) int cardCreationsPerHour,
         @Min(1) int cardReadsPerMinute,
-        @Min(1) int loginAttemptsPerMinute) {}
+        @Min(1) int loginAttemptsPerMinute,
+        @Min(1) int csrfTokensPerMinute) {}

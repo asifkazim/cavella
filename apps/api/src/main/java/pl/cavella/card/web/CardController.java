@@ -52,14 +52,14 @@ class CardController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     IssuedCardResponse create(HttpServletRequest request) {
-        rateLimiter.check("card-create", request.getRemoteAddr(), limits.cardCreationsPerHour(), Duration.ofHours(1));
+        rateLimiter.checkClient("card-create", request.getRemoteAddr(), limits.cardCreationsPerHour(), Duration.ofHours(1));
         IssuedCard card = cards.issueCard();
         return new IssuedCardResponse(card.token().value(), CardView.of(loyalty.balanceForToken(card.token())));
     }
 
     @GetMapping("/self")
     CardView self(@RequestHeader(value = TOKEN_HEADER, required = false) String rawToken, HttpServletRequest request) {
-        rateLimiter.check("card-read", request.getRemoteAddr(), limits.cardReadsPerMinute(), Duration.ofMinutes(1));
+        rateLimiter.checkClient("card-read", request.getRemoteAddr(), limits.cardReadsPerMinute(), Duration.ofMinutes(1));
         return CardView.of(loyalty.balanceForToken(parseOrNotFound(rawToken)));
     }
 

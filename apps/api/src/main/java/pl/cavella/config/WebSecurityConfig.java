@@ -37,6 +37,7 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
 import pl.cavella.shared.web.RateLimitProperties;
 import pl.cavella.staff.persistence.StaffRepository;
 import pl.cavella.staff.web.ActiveStaffFilter;
+import pl.cavella.staff.web.StaffSessionLifetime;
 
 /**
  * HTTP security (ARCHITECTURE §7). Composition root: wires the modules' web pieces together.
@@ -107,7 +108,8 @@ public class WebSecurityConfig {
             CsrfTokenRepository csrfTokens,
             SecurityContextRepository contexts,
             ProblemSecurityHandler problems,
-            StaffRepository staff)
+            StaffRepository staff,
+            StaffSessionLifetime sessionLifetime)
             throws Exception {
         // Uses the bean named "corsConfigurationSource" below (MVC also exposes one, so not by type).
         http.cors(Customizer.withDefaults())
@@ -131,7 +133,7 @@ public class WebSecurityConfig {
                 .logout(l -> l.logoutUrl("/api/v1/staff/auth/logout")
                         .logoutSuccessHandler(new HttpStatusReturningLogoutSuccessHandler(HttpStatus.NO_CONTENT)))
                 .exceptionHandling(e -> e.authenticationEntryPoint(problems).accessDeniedHandler(problems))
-                .addFilterBefore(new ActiveStaffFilter(staff), AnonymousAuthenticationFilter.class);
+                .addFilterBefore(new ActiveStaffFilter(staff, sessionLifetime), AnonymousAuthenticationFilter.class);
         return http.build();
     }
 

@@ -11,6 +11,10 @@ spring:
       connection-init-sql: "SET lock_timeout = '3s'; SET statement_timeout = '5s'"
   flyway:
     locations: classpath:db/migration
+    # Migrations must not inherit the app's 5 s statement_timeout (an index build or backfill
+    # would fail the deploy). The lock timeout stays bounded so a stuck lock can't hang startup.
+    # Flyway borrows pool connections; MigrationConfig evicts them afterwards (L4).
+    init-sqls: "SET statement_timeout = 0; SET lock_timeout = '30s'"
   session:
     timeout: 12h # shift-length staff sessions (PRD FR-S-02)
     jdbc:
@@ -36,6 +40,11 @@ server:
 
 cavella:
   session:
+    # Absolute staff session lifetime from login (PRD FR-S-02, [PLACEHOLDER: 12 h]). Unlike
+    # spring.session.timeout (inactivity, sliding), activity does not extend it.
+    max-lifetime: 12h
+    # Idle timeout of a session that only holds a CSRF token before login (L2).
+    anonymous-timeout: 10m
     cookie:
       # __Host- prefix: browsers only accept it with Secure, Path=/ and no Domain.
       # HttpOnly and SameSite=Strict are always set (pl.cavella.config.SessionConfig).
@@ -48,6 +57,7 @@ cavella:
     card-creations-per-hour: 5 # per client IP (PRD FR-L-06)
     card-reads-per-minute: 60
     login-attempts-per-minute: 20 # per client IP; accounts also lock after 5 failures (AC-S-07)
+    csrf-tokens-per-minute: 30 # per client IP; each anonymous call starts a session (L2)
   bootstrap:
     owner:
       # Creates the first OWNER when none exists. Set once, then remove from the environment.

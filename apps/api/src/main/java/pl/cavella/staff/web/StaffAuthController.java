@@ -2,6 +2,7 @@ package pl.cavella.staff.web;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -61,35 +62,48 @@ class StaffAuthController {
     private final SecurityContextRepository securityContexts;
     private final RateLimiter rateLimiter;
     private final RateLimitProperties limits;
+    private final StaffSessionLifetime sessionLifetime;
 
     StaffAuthController(
             StaffAuthenticationService authentication,
             SessionAuthenticationStrategy loginSessionStrategy,
             SecurityContextRepository securityContexts,
             RateLimiter rateLimiter,
-            RateLimitProperties limits) {
+            RateLimitProperties limits,
+            StaffSessionLifetime sessionLifetime) {
         this.authentication = authentication;
         this.loginSessionStrategy = loginSessionStrategy;
         this.securityContexts = securityContexts;
         this.rateLimiter = rateLimiter;
         this.limits = limits;
+        this.sessionLifetime = sessionLifetime;
     }
 
-    /** Starts a session and returns its CSRF token; call before logging in. */
+    /**
+     * Starts a session and returns its CSRF token; call before logging in. Public, so it is
+     * rate-limited before any session is written, and a pre-login session expires quickly (L2).
+     */
     @GetMapping("/api/v1/staff/auth/csrf")
-    CsrfResponse csrf(CsrfToken token) {
-        return new CsrfResponse(token.getHeaderName(), token.getToken());
+    CsrfResponse csrf(CsrfToken token, HttpServletRequest request) {
+        rateLimiter.checkClient("csrf", request.getRemoteAddr(), limits.csrfTokensPerMinute(), Duration.ofMinutes(1));
+        String value = token.getToken(); // deferred token: this is what creates the session
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            sessionLifetime.limitIfAnonymous(session);
+        }
+        return new CsrfResponse(token.getHeaderName(), value);
     }
 
     @PostMapping("/api/v1/staff/auth/login")
     LoginResponse login(
             @Valid @RequestBody LoginRequest body, HttpServletRequest request, HttpServletResponse response) {
-        rateLimiter.check("login", request.getRemoteAddr(), limits.loginAttemptsPerMinute(), Duration.ofMinutes(1));
+        rateLimiter.checkClient("login", request.getRemoteAddr(), limits.loginAttemptsPerMinute(), Duration.ofMinutes(1));
         StaffPrincipal staff = authentication.login(body.email(), body.password());
 
         Authentication auth = UsernamePasswordAuthenticationToken.authenticated(
                 staff, null, List.of(new SimpleGrantedAuthority(staff.role().authority())));
         loginSessionStrategy.onAuthentication(auth, request, response); // new session id + new CSRF token
+        sessionLifetime.start(request.getSession()); // the shift starts now (FR-S-02)
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(auth);
         SecurityContextHolder.setContext(context);

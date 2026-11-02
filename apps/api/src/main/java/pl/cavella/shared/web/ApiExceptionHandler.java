@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -74,6 +75,23 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
             return unauthenticated(null, request);
         }
         return Problems.response(HttpStatus.FORBIDDEN, "FORBIDDEN", "Not allowed", request);
+    }
+
+    /**
+     * Lock and statement timeouts (ARCHITECTURE §9.3): 503, retried by the client with the same
+     * key. Expected under contention, so a warning without stack trace, SQL or parameters.
+     */
+    @ExceptionHandler(DataAccessException.class)
+    ResponseEntity<ProblemDetail> dataAccess(DataAccessException e, HttpServletRequest request) {
+        if (!TransientDatabaseFailures.isTransient(e)) {
+            return unexpected(e, request);
+        }
+        log.warn("Transient database failure, SQLState {} (requestId={})",
+                TransientDatabaseFailures.sqlState(e), RequestIdFilter.of(request));
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, "1")
+                .body(Problems.detail(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE",
+                        "Temporarily unavailable, retry", request));
     }
 
     @ExceptionHandler(Exception.class)
