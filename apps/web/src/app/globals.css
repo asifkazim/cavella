@@ -1,0 +1,114 @@
+@import 'tailwindcss';
+
+/*
+ * Cavella design tokens. Contrast checked against WCAG 2.2 AA:
+ * - espresso-900 on cream-50/100: ≥ 14:1
+ * - caramel-700 on cream-100: ≈ 5.5:1 (text-safe accent on light backgrounds)
+ * - caramel-400 on espresso-900: ≈ 5.4:1 (text-safe accent on dark backgrounds)
+ * - cream-100 on espresso-900: ≈ 14:1
+ */
+@theme {
+  --color-espresso-950: #1d110b;
+  --color-espresso-900: #2b1a12;
+  --color-espresso-800: #3b2418;
+  --color-espresso-700: #4e3122;
+  --color-espresso-600: #6b4633;
+
+  --color-cream-50: #fffdf9;
+  --color-cream-100: #f7f0e6;
+  --color-cream-200: #efe3d1;
+  --color-cream-300: #e3d1b8;
+
+  --color-caramel-300: #e2ad6f;
+  --color-caramel-400: #c8843e;
+  --color-caramel-500: #b0712f;
+  --color-caramel-700: #8a531d;
+
+  --color-ink: #2b1a12;
+  --color-muted: #5f4a3d;
+
+  --font-display: var(--font-fraunces), 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  --radius-card: 1.25rem;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --header-height: 4rem;
+  }
+
+  html {
+    /* Clears the sticky header + menu category bar for anchor jumps. Sections must not add
+       their own scroll-margin, or the offsets stack (see CategoryNav READING_LINE_PX). */
+    scroll-padding-top: calc(var(--header-height) + 5rem);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
+  }
+
+  body {
+    background-color: var(--color-cream-100);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    /* Long Polish words must wrap instead of overflowing at large text sizes (NFR-A-04).
+       `break-word`, not `anywhere`: `anywhere` shrinks flex items' min-content and makes
+       button labels collapse to one syllable per line. */
+    overflow-wrap: break-word;
+  }
+
+  h1,
+  h2,
+  h3 {
+    hyphens: auto;
+  }
+
+  /* Grid items default to min-width:auto (their longest word), which blows grids past the
+     viewport at large text sizes. Zero specificity, so any explicit min-w-* still wins. */
+  :where(.grid) > * {
+    min-width: 0;
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--color-caramel-500);
+    outline-offset: 3px;
+    border-radius: 0.25rem;
+  }
+
+  ::selection {
+    background-color: var(--color-caramel-300);
+    color: var(--color-espresso-950);
+  }
+}
+
+@layer components {
+  .container-page {
+    width: 100%;
+    max-width: 72rem;
+    margin-inline: auto;
+    padding-inline: max(1.25rem, env(safe-area-inset-left, 0px));
+  }
+
+  @media (min-width: 640px) {
+    .container-page {
+      padding-inline: 2rem;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

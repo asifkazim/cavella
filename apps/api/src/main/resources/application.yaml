@@ -1,0 +1,59 @@
+spring:
+  application:
+    name: cavella-api
+  # No connection settings here on purpose: they come from the environment in every deployed
+  # environment (SPRING_DATASOURCE_URL / _USERNAME / _PASSWORD, see .env.example) and from
+  # Testcontainers (@ServiceConnection) in tests. The app refuses to start without them.
+  datasource:
+    hikari:
+      # Lock/statement timeouts for the app role (ARCHITECTURE §9.3): a stuck lock fails fast
+      # with a retryable error instead of hanging the cashier's phone.
+      connection-init-sql: "SET lock_timeout = '3s'; SET statement_timeout = '5s'"
+  flyway:
+    locations: classpath:db/migration
+  session:
+    timeout: 12h # shift-length staff sessions (PRD FR-S-02)
+    jdbc:
+      # The session tables are created by Flyway (V2), not by Spring Session.
+      initialize-schema: never
+  jackson:
+    deserialization:
+      # Reject unexpected JSON fields instead of silently ignoring them.
+      fail-on-unknown-properties: true
+  mvc:
+    problemdetails:
+      enabled: false # errors are rendered by pl.cavella.shared.web.ApiExceptionHandler
+
+server:
+  # Behind Caddy (ARCHITECTURE §11): trust X-Forwarded-* only from internal proxy addresses,
+  # so client IPs (used for rate limiting) cannot be spoofed by external callers.
+  forward-headers-strategy: native
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+    include-exception: false
+
+cavella:
+  session:
+    cookie:
+      # __Host- prefix: browsers only accept it with Secure, Path=/ and no Domain.
+      # HttpOnly and SameSite=Strict are always set (pl.cavella.config.SessionConfig).
+      name: __Host-cavella_sid
+      secure: true
+  cors:
+    # Exact origins of the web app, comma-separated (e.g. https://cavella.pl). Empty = no CORS.
+    allowed-origins: ${CAVELLA_CORS_ALLOWED_ORIGINS:}
+  rate-limit:
+    card-creations-per-hour: 5 # per client IP (PRD FR-L-06)
+    card-reads-per-minute: 60
+    login-attempts-per-minute: 20 # per client IP; accounts also lock after 5 failures (AC-S-07)
+  bootstrap:
+    owner:
+      # Creates the first OWNER when none exists. Set once, then remove from the environment.
+      email: ${CAVELLA_BOOTSTRAP_OWNER_EMAIL:}
+      password: ${CAVELLA_BOOTSTRAP_OWNER_PASSWORD:}
+
+logging:
+  pattern:
+    correlation: "[%X{requestId:-}] "

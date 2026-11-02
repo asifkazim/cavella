@@ -1,0 +1,10 @@
+# Local development only (SPRING_PROFILES_ACTIVE=dev). Browsers reject __Host-/Secure cookies
+# over plain http://localhost, so the session cookie is relaxed here — never in production.
+cavella:
+  session:
+    cookie:
+      name: cavella_sid
+      secure: false
+  cors:
+    # next dev (3000) and the static-export preview used by Playwright (4173).
+    allowed-origins: ${CAVELLA_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:4173}
