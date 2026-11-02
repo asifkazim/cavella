@@ -65,6 +65,11 @@ export const pl = {
     notFoundTitle: 'Nie znaleźliśmy tej karty',
     notFoundText: 'Karta mogła zostać usunięta po długim okresie nieużywania lub link jest nieprawidłowy.',
     removeCard: 'Usuń kartę z tego urządzenia',
+    confirmRemoveText:
+      'Karta zniknie z tego telefonu i nie da się jej przywrócić. Jeśli masz jej kopię (zdjęcie kodu QR, link), zachowaj ją.',
+    confirmRemove: 'Tak, usuń kartę',
+    keepCard: 'Zostaw kartę',
+    loadFailed: 'Nie udało się odświeżyć karty. Kod QR nadal działa.',
     newCard: 'Załóż nową kartę',
     saveTitle: 'Zapisz kartę',
     saveIntro: 'Karta jest zapisana w tej przeglądarce. Zrób kopię — po wyczyszczeniu danych przeglądarki lub zmianie telefonu tylko kopia pozwoli ją odzyskać.',
@@ -140,10 +145,17 @@ export const pl = {
     redeemSuccess: 'Kawa gratis wydana.',
     alreadyRecorded: 'To było już zapisane wcześniej — nic nie zostało zdublowane.',
     nextCard: 'Następna karta',
+    leaveUnresolved:
+      'Ostatnia operacja mogła już zostać zapisana. Najpierw spróbuj ponownie — tylko wtedy nie zostanie zapisana dwa razy.',
+    leaveAnyway: 'Mimo to przejdź dalej',
+    stay: 'Zostań',
     errors: {
-      network: 'Brak połączenia — nic nie zostało zapisane. Spróbuj ponownie.',
-      server: 'Błąd serwera — nie wiemy, czy zapisano. Spróbuj ponownie (bez ryzyka podwójnego zapisu).',
+      offline: 'Brak połączenia z serwerem. Spróbuj ponownie.',
+      unknownOutcome:
+        'Brak odpowiedzi serwera — nie wiemy, czy zapisano. Spróbuj ponownie (bez ryzyka podwójnego zapisu).',
       session: 'Sesja wygasła. Zaloguj się ponownie.',
+      interrupted:
+        'Sesja wygasła w trakcie tej operacji. Spróbuj ponownie, aby ją dokończyć (bez ryzyka podwójnego zapisu).',
       csrf: 'Sesja wymagała odświeżenia. Spróbuj ponownie.',
       rateLimited: 'Zbyt wiele prób. Odczekaj chwilę.',
       noReward: 'Klient nie ma kawy gratis do odebrania.',

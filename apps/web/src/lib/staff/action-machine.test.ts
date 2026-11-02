@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError, NetworkError } from '@/lib/api/client';
-import { actionReducer, canSubmit, IDLE, type ActionState } from './action-machine';
+import { actionReducer, canSubmit, IDLE, isUnresolved, resumed, type ActionState } from './action-machine';
 import { toFailure } from './failures';
 
 const prepare = (key: string, quantity = 1) =>
@@ -53,6 +53,42 @@ describe('cashier action state machine', () => {
     );
     expect(canSubmit(rejected)).toBe(false);
     expect(actionReducer(rejected, { type: 'submit' })).toBe(rejected);
+  });
+
+  it('blocks a new intent while the previous outcome is unknown (H2: no second key after a lost response)', () => {
+    for (const failure of [{ kind: 'network' }, { kind: 'server' }] as const) {
+      const unknown = run(prepare('k1'), { type: 'submit' }, { type: 'fail', failure });
+      expect(isUnresolved(unknown)).toBe(true);
+      expect(actionReducer(unknown, prepare('k2', 2))).toBe(unknown);
+      expect(actionReducer(unknown, { type: 'reset' })).toBe(unknown);
+    }
+  });
+
+  it('allows a new intent once the outcome is known', () => {
+    const rejected = run(
+      prepare('k1'),
+      { type: 'submit' },
+      { type: 'fail', failure: { kind: 'rejected', code: 'NO_REWARD_AVAILABLE' } },
+    );
+    expect(isUnresolved(rejected)).toBe(false);
+    expect(actionReducer(rejected, prepare('k2'))).toEqual({
+      status: 'confirming',
+      action: { kind: 'stamp', quantity: 1, idempotencyKey: 'k2' },
+    });
+    const succeeded = run(prepare('k1'), { type: 'submit' }, { type: 'succeed', replayed: false, rewardsEarned: 0 });
+    expect(isUnresolved(succeeded)).toBe(false);
+    expect(isUnresolved(IDLE)).toBe(false);
+  });
+
+  it('a resumed action (L5) can only be retried, with its original key', () => {
+    const state = resumed({ kind: 'redeem', quantity: 1, idempotencyKey: 'k1' });
+    expect(isUnresolved(state)).toBe(true);
+    expect(canSubmit(state)).toBe(true);
+    expect(actionReducer(state, prepare('k2'))).toBe(state);
+    expect(actionReducer(state, { type: 'submit' })).toEqual({
+      status: 'submitting',
+      action: { kind: 'redeem', quantity: 1, idempotencyKey: 'k1' },
+    });
   });
 
   it('ignores stray results that do not belong to an in-flight action', () => {

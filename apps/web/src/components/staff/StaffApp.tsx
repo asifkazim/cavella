@@ -8,6 +8,7 @@ import { lookUpCard, type CardSummary } from '@/lib/api/staff';
 import type { ActionFailure } from '@/lib/staff/action-machine';
 import { toFailure } from '@/lib/staff/failures';
 import { failureMessage } from '@/lib/staff/messages';
+import { resumeFor, type PendingAction } from '@/lib/staff/pending-action';
 import { CardActionsPanel } from './CardActionsPanel';
 import { ManualCodeForm } from './ManualCodeForm';
 import { QrScanner } from './QrScanner';
@@ -24,10 +25,13 @@ export function StaffApp({ locale }: { locale: Locale }) {
   const t = getDictionary(locale).staff;
   const { state, retry, login, logout, expire, refreshCsrf } = useStaffSession();
   const [lookup, setLookup] = useState<Lookup>({ status: 'scanning' });
+  /** An action cut off by session expiry, kept across the re-login (L5). */
+  const [pending, setPending] = useState<PendingAction | null>(null);
   const csrfToken = state.status === 'signedIn' ? state.csrfToken : null;
 
   async function findCard(token: string) {
     if (!csrfToken) return;
+    setPending(null); // a new card is a new context
     setLookup({ status: 'loading' });
     try {
       setLookup({ status: 'found', summary: await lookUpCard(token, csrfToken), key: Date.now() });
@@ -45,7 +49,7 @@ export function StaffApp({ locale }: { locale: Locale }) {
   if (state.status === 'unreachable') {
     return (
       <div role="alert" className="mx-auto max-w-md rounded-2xl bg-rose-100 p-6 text-rose-950">
-        <p>{t.errors.network}</p>
+        <p>{t.errors.offline}</p>
         <button type="button" onClick={() => void retry()} className="mt-3 inline-flex min-h-12 items-center rounded-[24px] border border-rose-950/30 px-[22px] font-semibold">
           {t.retry}
         </button>
@@ -56,25 +60,45 @@ export function StaffApp({ locale }: { locale: Locale }) {
     return <StaffLoginForm onLogin={login} expired={state.expired} t={t} />;
   }
 
+  const staffId = state.staff.id;
+  // Someone else signed in after the expiry: they start from scanning, and a rescan shows the
+  // real balance. The previous cashier's action is never retried under their account.
+  const foreignPending = pending !== null && pending.staffId !== staffId;
+  const found = lookup.status === 'found' && !foreignPending ? lookup : null;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted">{interpolate(t.signedInAs, { role: t.roles[state.staff.role] })}</p>
-        <button type="button" onClick={() => void logout()} className="inline-flex min-h-11 items-center rounded-full px-4 font-semibold underline underline-offset-4">
+        <button
+          type="button"
+          onClick={() => {
+            setPending(null);
+            void logout();
+          }}
+          className="inline-flex min-h-11 items-center rounded-full px-4 font-semibold underline underline-offset-4"
+        >
           {t.signOut}
         </button>
       </div>
 
-      {lookup.status === 'found' ? (
+      {found ? (
         <CardActionsPanel
-          key={lookup.key}
-          summary={lookup.summary}
+          key={found.key}
+          summary={found.summary}
           csrfToken={state.csrfToken}
           locale={locale}
           t={t}
-          onSessionExpired={expire}
+          resumeAction={resumeFor(pending, staffId, found.summary.cardId)}
+          onSessionExpired={(interrupted) => {
+            setPending({ staffId, cardId: found.summary.cardId, action: interrupted });
+            expire();
+          }}
           onCsrfInvalid={refreshCsrf}
-          onNext={() => setLookup({ status: 'scanning' })}
+          onNext={() => {
+            setPending(null);
+            setLookup({ status: 'scanning' });
+          }}
         />
       ) : (
         <div className="grid gap-6 lg:grid-cols-2">
@@ -93,7 +117,7 @@ export function StaffApp({ locale }: { locale: Locale }) {
               {lookup.status === 'loading' ? <p role="status">{t.lookingUp}</p> : null}
               {lookup.status === 'failed' ? (
                 <div role="alert" className="rounded-xl bg-rose-100 p-4 text-rose-950" data-testid="lookup-error">
-                  <p className="font-semibold">{failureMessage(lookup.failure, t)}</p>
+                  <p className="font-semibold">{failureMessage(lookup.failure, t, 'lookup')}</p>
                   {lookup.failure.kind !== 'rejected' ? (
                     <button type="button" onClick={() => void findCard(lookup.token)} className="mt-2 inline-flex min-h-11 items-center rounded-full font-semibold underline underline-offset-4">
                       {t.retry}

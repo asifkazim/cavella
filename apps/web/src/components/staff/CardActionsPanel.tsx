@@ -1,13 +1,15 @@
 'use client';
 
-import { useReducer, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import type { Locale } from '@/content/types';
 import type { Dictionary } from '@/i18n';
 import { interpolate } from '@/i18n';
 import { addStamps, redeemReward, type CardSummary } from '@/lib/api/staff';
 import { intlLocale } from '@/lib/format';
 import { BUSINESS_TIME_ZONE } from '@/lib/hours';
-import { actionReducer, canSubmit, IDLE, isRetryable, type ActionKind } from '@/lib/staff/action-machine';
+import {
+  actionReducer, canSubmit, IDLE, isRetryable, isUnresolved, resumed, type ActionKind, type PreparedAction,
+} from '@/lib/staff/action-machine';
 import { toFailure } from '@/lib/staff/failures';
 import { failureMessage } from '@/lib/staff/messages';
 
@@ -19,7 +21,10 @@ interface CardActionsPanelProps {
   readonly csrfToken: string;
   readonly locale: Locale;
   readonly t: Dictionary['staff'];
-  readonly onSessionExpired: () => void;
+  /** Receives the action that was cut off, so it can be resumed with its key after re-login. */
+  readonly onSessionExpired: (interrupted: PreparedAction) => void;
+  /** An action interrupted by session expiry, to finish (retry-only) on mount. */
+  readonly resumeAction?: PreparedAction | null;
   readonly onCsrfInvalid: () => Promise<void>;
   readonly onNext: () => void;
 }
@@ -31,17 +36,58 @@ const secondary =
 
 /** Card summary plus the two cashier actions, each behind an explicit confirm (PRD J4, J5). */
 export function CardActionsPanel({
-  summary: initial, csrfToken, locale, t, onSessionExpired, onCsrfInvalid, onNext,
+  summary: initial, csrfToken, locale, t, onSessionExpired, onCsrfInvalid, onNext, resumeAction,
 }: CardActionsPanelProps) {
   const [summary, setSummary] = useState(initial);
-  const [quantity, setQuantity] = useState(1);
-  const [action, dispatch] = useReducer(actionReducer, IDLE);
+  const [quantity, setQuantity] = useState(resumeAction?.kind === 'stamp' ? resumeAction.quantity : 1);
+  const [action, dispatch] = useReducer(actionReducer, resumeAction ?? null, (a) => (a ? resumed(a) : IDLE));
   /** Blocks a second request even before React re-renders (double tap within one frame). */
   const inFlight = useRef(false);
+
+  /** The cashier tapped "Next card" while the last action's outcome was still unknown. */
+  const [leaveRequested, setLeaveRequested] = useState(false);
+  const stayButton = useRef<HTMLButtonElement>(null);
+  // The "Next card" button is replaced by the warning: keep keyboard/screen-reader focus on it.
+  useEffect(() => {
+    if (leaveRequested) stayButton.current?.focus();
+  }, [leaveRequested]);
+
+  // Focus management (L6, WAI-ARIA alertdialog pattern): into the redeem confirmation on its
+  // least destructive choice, back to its opener on cancel, and onto the outcome once known.
+  const redeemButton = useRef<HTMLButtonElement>(null);
+  const cancelRedeemButton = useRef<HTMLButtonElement>(null);
+  const outcome = useRef<HTMLDivElement>(null);
+  const returnFocusToRedeem = useRef(false);
+  const confirmingRedeem = action.status === 'confirming' && action.action.kind === 'redeem';
+  useEffect(() => {
+    if (confirmingRedeem) {
+      cancelRedeemButton.current?.focus();
+    } else if (returnFocusToRedeem.current && action.status === 'idle') {
+      returnFocusToRedeem.current = false;
+      redeemButton.current?.focus();
+    }
+  }, [confirmingRedeem, action.status]);
+  useEffect(() => {
+    // The confirm button disappears with its dialog; without this, focus falls back to <body>.
+    if (action.status === 'succeeded' || action.status === 'failed') outcome.current?.focus();
+  }, [action]);
+
+  function cancelRedeem() {
+    returnFocusToRedeem.current = true;
+    dispatch({ type: 'reset' });
+  }
 
   const { balance, status } = summary;
   const blocked = status === 'BLOCKED';
   const busy = action.status === 'submitting';
+  /** A new action would get a new key and could double the one that may have committed (H2). */
+  const unresolved = isUnresolved(action);
+  const locked = busy || unresolved;
+
+  function next() {
+    if (unresolved) setLeaveRequested(true);
+    else onNext();
+  }
 
   function prepare(kind: ActionKind, qty: number) {
     dispatch({ type: 'prepare', kind, quantity: qty, idempotencyKey: crypto.randomUUID() });
@@ -71,7 +117,7 @@ export function CardActionsPanel({
     } catch (error) {
       const failure = toFailure(error);
       if (failure.kind === 'session') {
-        onSessionExpired();
+        onSessionExpired({ kind, quantity: qty, idempotencyKey });
         return;
       }
       if (failure.kind === 'csrf') await onCsrfInvalid();
@@ -117,9 +163,9 @@ export function CardActionsPanel({
           <div>
             <p className="font-semibold" id="qty-label">{t.quantityLabel}</p>
             <div className="mt-2 flex items-center gap-3" role="group" aria-labelledby="qty-label">
-              <button type="button" className={`${secondary} w-12 px-0 text-xl`} aria-label={t.decrease} disabled={busy || quantity <= 1} onClick={() => changeQuantity(quantity - 1)}>−</button>
+              <button type="button" className={`${secondary} w-12 px-0 text-xl`} aria-label={t.decrease} disabled={locked || quantity <= 1} onClick={() => changeQuantity(quantity - 1)}>−</button>
               <output aria-live="polite" className="w-10 text-center font-display text-3xl font-semibold">{quantity}</output>
-              <button type="button" className={`${secondary} w-12 px-0 text-xl`} aria-label={t.increase} disabled={busy || quantity >= MAX_STAMPS_PER_TRANSACTION} onClick={() => changeQuantity(quantity + 1)}>+</button>
+              <button type="button" className={`${secondary} w-12 px-0 text-xl`} aria-label={t.increase} disabled={locked || quantity >= MAX_STAMPS_PER_TRANSACTION} onClick={() => changeQuantity(quantity + 1)}>+</button>
             </div>
             {action.status === 'confirming' && action.action.kind === 'stamp' ? (
               <div className="mt-3 flex flex-wrap gap-3">
@@ -129,7 +175,7 @@ export function CardActionsPanel({
                 <button type="button" className={secondary} onClick={() => dispatch({ type: 'reset' })}>{t.cancel}</button>
               </div>
             ) : (
-              <button type="button" className={`${primary} mt-3`} disabled={busy} onClick={() => prepare('stamp', quantity)}>
+              <button type="button" className={`${primary} mt-3`} disabled={locked} onClick={() => prepare('stamp', quantity)}>
                 {busy && action.action.kind === 'stamp' ? t.submitting : t.addStamps}
               </button>
             )}
@@ -137,16 +183,16 @@ export function CardActionsPanel({
 
           {/* Redeem */}
           <div className="border-t border-espresso-900/10 pt-6">
-            {action.status === 'confirming' && action.action.kind === 'redeem' ? (
+            {confirmingRedeem ? (
               <div role="alertdialog" aria-labelledby="redeem-confirm-title" className="rounded-2xl bg-caramel-300/30 p-4">
                 <p id="redeem-confirm-title" className="font-semibold">{t.confirmRedeemTitle}</p>
                 <div className="mt-3 flex flex-wrap gap-3">
                   <button type="button" className={primary} onClick={() => void submit()}>{t.confirmRedeem}</button>
-                  <button type="button" className={secondary} onClick={() => dispatch({ type: 'reset' })}>{t.cancel}</button>
+                  <button type="button" ref={cancelRedeemButton} className={secondary} onClick={cancelRedeem}>{t.cancel}</button>
                 </div>
               </div>
             ) : (
-              <button type="button" className={secondary} disabled={busy || balance.rewardsAvailable === 0} onClick={() => prepare('redeem', 1)}>
+              <button type="button" ref={redeemButton} className={secondary} disabled={locked || balance.rewardsAvailable === 0} onClick={() => prepare('redeem', 1)}>
                 {busy && action.action.kind === 'redeem' ? t.submitting : t.redeem}
               </button>
             )}
@@ -157,7 +203,7 @@ export function CardActionsPanel({
       {/* Feedback */}
       <div className="mt-6 min-h-6">
         {action.status === 'succeeded' ? (
-          <div role="status" className="rounded-xl bg-emerald-100 p-4 text-emerald-950" data-testid="action-success">
+          <div ref={outcome} tabIndex={-1} role="status" className="rounded-xl bg-emerald-100 p-4 text-emerald-950" data-testid="action-success">
             <p className="font-semibold">
               ✓ {action.action.kind === 'stamp' ? interpolate(t.stampSuccess, { count: String(action.action.quantity) }) : t.redeemSuccess}
             </p>
@@ -166,7 +212,7 @@ export function CardActionsPanel({
           </div>
         ) : null}
         {action.status === 'failed' ? (
-          <div role="alert" className="rounded-xl bg-rose-100 p-4 text-rose-950" data-testid="action-error">
+          <div ref={outcome} tabIndex={-1} role="alert" className="rounded-xl bg-rose-100 p-4 text-rose-950" data-testid="action-error">
             <p className="font-semibold">{failureMessage(action.failure, t)}</p>
             {isRetryable(action.failure) ? (
               <button type="button" className={`${secondary} mt-3`} onClick={() => void submit()}>{t.retry}</button>
@@ -175,7 +221,17 @@ export function CardActionsPanel({
         ) : null}
       </div>
 
-      <button type="button" className={`${secondary} mt-6 w-full`} disabled={busy} onClick={onNext}>{t.nextCard}</button>
+      {leaveRequested && unresolved ? (
+        <div role="alert" className="mt-6 rounded-xl bg-caramel-300/30 p-4" data-testid="leave-unresolved">
+          <p className="font-semibold">{t.leaveUnresolved}</p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <button type="button" ref={stayButton} className={secondary} onClick={() => setLeaveRequested(false)}>{t.stay}</button>
+            <button type="button" className={secondary} onClick={onNext}>{t.leaveAnyway}</button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className={`${secondary} mt-6 w-full`} disabled={busy} onClick={next}>{t.nextCard}</button>
+      )}
     </section>
   );
 }

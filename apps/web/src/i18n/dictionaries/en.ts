@@ -67,6 +67,11 @@ export const en: Dictionary = {
     notFoundTitle: 'We could not find this card',
     notFoundText: 'The card may have been removed after a long time without use, or the link is wrong.',
     removeCard: 'Remove card from this device',
+    confirmRemoveText:
+      'The card will disappear from this phone and cannot be restored. If you have a copy (QR screenshot, link), keep it.',
+    confirmRemove: 'Yes, remove the card',
+    keepCard: 'Keep the card',
+    loadFailed: 'We could not refresh your card. The QR code still works.',
     newCard: 'Get a new card',
     saveTitle: 'Save your card',
     saveIntro: 'Your card is stored in this browser. Make a copy — if you clear your browser data or change phones, only a copy can bring it back.',
@@ -142,10 +147,17 @@ export const en: Dictionary = {
     redeemSuccess: 'Free coffee given.',
     alreadyRecorded: 'This was already recorded — nothing was duplicated.',
     nextCard: 'Next card',
+    leaveUnresolved:
+      'The last action may already have been saved. Try again first — that is the only way to avoid recording it twice.',
+    leaveAnyway: 'Move on anyway',
+    stay: 'Stay',
     errors: {
-      network: 'No connection — nothing was saved. Try again.',
-      server: 'Server error — it may or may not have been saved. Try again (it cannot be recorded twice).',
+      offline: 'No connection to the server. Try again.',
+      unknownOutcome:
+        'No answer from the server — it may or may not have been saved. Try again (it cannot be recorded twice).',
       session: 'Your session expired. Please sign in again.',
+      interrupted:
+        'Your session expired during this action. Try again to finish it (it cannot be recorded twice).',
       csrf: 'The session needed a refresh. Try again.',
       rateLimited: 'Too many attempts. Wait a moment.',
       noReward: 'The customer has no free coffee to redeem.',

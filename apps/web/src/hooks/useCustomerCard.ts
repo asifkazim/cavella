@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { ApiError, NetworkError } from '@/lib/api/client';
 import { createCard, fetchCard, type CardBalance } from '@/lib/api/customer';
+import { cardIssueOf, type CardIssue } from '@/lib/loyalty/card-issue';
 import {
   parseStoredCard,
   readPendingToken,
@@ -14,17 +14,14 @@ import {
   type StoredCard,
 } from '@/lib/loyalty/card-storage';
 
-/** Why the latest balance could not be fetched. The card itself stays usable in every case. */
-export type CardIssue = 'offline' | 'notFound' | 'rateLimited' | 'generic';
 export type CreateIssue = 'offline' | 'rateLimited' | 'generic';
 
 const REFRESH_INTERVAL_MS = 15_000; // well inside the API's 60 reads/minute per client
 
-function issueOf(error: unknown): CardIssue {
-  if (error instanceof NetworkError) return 'offline';
-  if (error instanceof ApiError && error.status === 404) return 'notFound';
-  if (error instanceof ApiError && error.status === 429) return 'rateLimited';
-  return 'generic';
+/** Card creation has no "not found": anything that isn't offline or rate-limited is generic. */
+function createIssueOf(error: unknown): CreateIssue {
+  const issue = cardIssueOf(error);
+  return issue === 'offline' || issue === 'rateLimited' ? issue : 'generic';
 }
 
 const noServerSnapshot = (): undefined => undefined;
@@ -64,7 +61,7 @@ export function useCustomerCard() {
       keep({ token, balance, balanceAt: new Date().toISOString() });
       setIssue(null);
     } catch (error) {
-      setIssue(issueOf(error));
+      setIssue(cardIssueOf(error));
     } finally {
       setBusy(null);
     }
@@ -94,8 +91,7 @@ export function useCustomerCard() {
       keep({ token: issued.token, balance: issued.card, balanceAt: new Date().toISOString() });
       setIssue(null);
     } catch (error) {
-      const kind = issueOf(error);
-      setCreateIssue(kind === 'offline' || kind === 'rateLimited' ? kind : 'generic');
+      setCreateIssue(createIssueOf(error));
     } finally {
       setBusy(null);
     }

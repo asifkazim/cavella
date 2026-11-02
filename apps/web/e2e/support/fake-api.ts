@@ -25,10 +25,19 @@ export interface LoggedRequest {
   body: string | null;
 }
 
-type Fault = { path: RegExp; method: string; kind: 'network' | number; remaining: number };
+/**
+ * 'network': the request never reaches the server. 'lostResponse': the server processes and
+ * commits it, but the answer never reaches the client (timeout, dropped connection). A number:
+ * the server answers with that HTTP status.
+ */
+type FaultKind = 'network' | 'lostResponse' | number;
+type Fault = { path: RegExp; method: string; kind: FaultKind; remaining: number };
 
 export const STAFF_EMAIL = 'anna@cavella.test';
 export const STAFF_PASSWORD = 'correct horse battery staple';
+/** A second cashier, for flows where who signs in matters. */
+export const OTHER_STAFF_EMAIL = 'piotr@cavella.test';
+const ACCOUNTS: Record<string, string> = { [STAFF_EMAIL]: 'staff-anna', [OTHER_STAFF_EMAIL]: 'staff-piotr' };
 const STAMPS_PER_REWARD = 6;
 const MAX_PER_TX = 3;
 
@@ -42,7 +51,9 @@ export class FakeApi {
   signedIn = false;
   csrfToken = 'csrf-anonymous';
   private faults: Fault[] = [];
-  /** Stored outcomes per idempotency key, like the real idempotency_record table. */
+  /** Who the session belongs to (set on login). */
+  staffId = 'staff-anna';
+  /** Stored outcomes per (staff, idempotency key), like the real idempotency_record table. */
   private outcomes = new Map<string, { status: number; body: unknown; replayable: boolean }>();
 
   async install(page: Page): Promise<void> {
@@ -64,7 +75,7 @@ export class FakeApi {
   }
 
   /** The next `times` matching requests fail with a network error or the given HTTP status. */
-  fail(method: string, path: RegExp, kind: 'network' | number, times = 1): void {
+  fail(method: string, path: RegExp, kind: FaultKind, times = 1): void {
     this.faults.push({ method, path, kind, remaining: times });
   }
 
@@ -93,13 +104,17 @@ export class FakeApi {
     this.requests.push({ method, path: url.pathname, url: request.url(), headers, body: request.postData() });
 
     const fault = this.faults.find((f) => f.method === method && f.path.test(url.pathname) && f.remaining > 0);
+    let loseResponse = false;
     if (fault) {
       fault.remaining--;
       if (fault.kind === 'network') return route.abort('internetdisconnected');
-      return json(fault.kind, { code: fault.kind >= 500 ? 'INTERNAL_ERROR' : `HTTP_${fault.kind}` });
+      if (fault.kind === 'lostResponse') loseResponse = true;
+      else return json(fault.kind, { code: fault.kind >= 500 ? 'INTERNAL_ERROR' : `HTTP_${fault.kind}` });
     }
 
     function json(status: number, body: unknown, extra: Record<string, string> = {}) {
+      // The request was fully processed above; only the answer is lost on the way back.
+      if (loseResponse) return route.abort('connectionreset');
       return route.fulfill({
         status,
         headers: { ...cors, 'Content-Type': status >= 400 ? 'application/problem+json' : 'application/json', ...extra },
@@ -127,13 +142,15 @@ export class FakeApi {
     if (method === 'POST' && path === '/api/v1/staff/auth/login') {
       if (headers['x-csrf-token'] !== this.csrfToken) return problem(403, 'CSRF_INVALID');
       const { email, password } = body();
-      if (email !== STAFF_EMAIL || password !== STAFF_PASSWORD) return problem(401, 'INVALID_CREDENTIALS');
+      const account = typeof email === 'string' ? ACCOUNTS[email] : undefined;
+      if (!account || password !== STAFF_PASSWORD) return problem(401, 'INVALID_CREDENTIALS');
       this.signedIn = true;
+      this.staffId = account;
       this.csrfToken = 'csrf-session-1'; // rotates on login
-      return json(200, { staff: { id: 'staff-anna', role: 'CASHIER' }, csrfToken: this.csrfToken });
+      return json(200, { staff: { id: this.staffId, role: 'CASHIER' }, csrfToken: this.csrfToken });
     }
     if (method === 'GET' && path === '/api/v1/staff/me') {
-      return this.signedIn ? json(200, { id: 'staff-anna', role: 'CASHIER' }) : problem(401, 'UNAUTHENTICATED');
+      return this.signedIn ? json(200, { id: this.staffId, role: 'CASHIER' }) : problem(401, 'UNAUTHENTICATED');
     }
 
     // ---- staff endpoints: session + CSRF -------------------------------------------------
@@ -155,13 +172,14 @@ export class FakeApi {
     if (method === 'POST' && action) {
       const key = headers['idempotency-key'];
       if (!key) return problem(400, 'IDEMPOTENCY_KEY_REQUIRED');
-      const stored = this.outcomes.get(key);
+      const scopedKey = `${this.staffId}|${key}`;
+      const stored = this.outcomes.get(scopedKey);
       if (stored) {
         return stored.replayable ? json(stored.status, stored.body, { 'Idempotent-Replayed': 'true' }) : json(stored.status, stored.body);
       }
       const card = this.cards.find((c) => c.id === action[1]);
       const remember = (status: number, responseBody: unknown, replayable: boolean) => {
-        this.outcomes.set(key, { status, body: responseBody, replayable });
+        this.outcomes.set(scopedKey, { status, body: responseBody, replayable });
         return json(status, responseBody);
       };
       if (!card) return remember(404, { status: 404, code: 'CARD_NOT_FOUND' }, false);

@@ -1,9 +1,9 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Locale } from '@/content/types';
 import { useCustomerCard } from '@/hooks/useCustomerCard';
-import { getDictionary, interpolate } from '@/i18n';
+import { getDictionary, interpolate, type Dictionary } from '@/i18n';
 import { intlLocale } from '@/lib/format';
 import { BUSINESS_TIME_ZONE } from '@/lib/hours';
 import { cardLink, formatCardCode } from '@/lib/loyalty/card-token';
@@ -23,6 +23,35 @@ function Notice({ tone, children }: { tone: 'info' | 'error'; children: ReactNod
       className={`rounded-2xl p-4 ${tone === 'error' ? 'bg-rose-100 text-rose-950' : 'bg-cream-200/80 text-ink'}`}
     >
       {children}
+    </div>
+  );
+}
+
+/**
+ * Removing the card deletes the only copy on this device (E-06), so it takes two steps.
+ * Focus moves to the safe choice when the confirmation opens.
+ */
+function RemoveCard({ onRemove, t }: { onRemove: () => void; t: Dictionary['loyalty'] }) {
+  const [confirming, setConfirming] = useState(false);
+  const keepButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (confirming) keepButton.current?.focus();
+  }, [confirming]);
+
+  if (!confirming) {
+    return (
+      <div className="mt-4 flex flex-wrap gap-3">
+        <button type="button" className={secondaryButton} onClick={() => setConfirming(true)}>{t.removeCard}</button>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-4" data-testid="confirm-remove">
+      <p className="font-semibold">{t.confirmRemoveText}</p>
+      <div className="mt-3 flex flex-wrap gap-3">
+        <button type="button" ref={keepButton} className={secondaryButton} onClick={() => setConfirming(false)}>{t.keepCard}</button>
+        <button type="button" className={secondaryButton} onClick={onRemove}>{t.confirmRemove}</button>
+      </div>
     </div>
   );
 }
@@ -106,9 +135,7 @@ export function CustomerCardApp({ locale }: { locale: Locale }) {
         <section role="alert" className="rounded-(--radius-card) bg-rose-100 p-6 text-rose-950">
           <h2 className="font-display text-2xl font-semibold">{t.notFoundTitle}</h2>
           <p className="mt-2">{t.notFoundText}</p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button type="button" className={secondaryButton} onClick={forget}>{t.removeCard}</button>
-          </div>
+          <RemoveCard onRemove={forget} t={t} />
         </section>
       ) : null}
 
@@ -154,7 +181,16 @@ export function CustomerCardApp({ locale }: { locale: Locale }) {
             </div>
           ) : null}
           {issue === 'rateLimited' ? <div className="mt-4"><Notice tone="info">{t.rateLimited}</Notice></div> : null}
-          {issue === 'generic' ? <div className="mt-4"><Notice tone="error">{t.createFailed}</Notice></div> : null}
+          {issue === 'generic' ? (
+            <div className="mt-4">
+              <Notice tone="error">
+                {t.loadFailed}{' '}
+                <button type="button" className="font-semibold underline underline-offset-4" onClick={() => void refresh()}>
+                  {t.retry}
+                </button>
+              </Notice>
+            </div>
+          ) : null}
         </section>
       </div>
 

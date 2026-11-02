@@ -151,14 +151,47 @@ test('save options: card image download, copyable link with a warning, and recov
   await expect(page.getByText('Bez kopii karty nie da się odzyskać')).toBeVisible();
 });
 
-test('an unknown card is reported and can be removed from the device', async ({ page }) => {
-  await preloadCard(page, newToken());
+test('an unknown card is reported and can be removed from the device after confirming', async ({ page }) => {
+  const token = newToken();
+  await preloadCard(page, token);
   await page.goto('/pl/card/');
 
   await expect(page.getByRole('heading', { name: 'Nie znaleźliśmy tej karty' })).toBeVisible();
   await page.getByRole('button', { name: 'Usuń kartę z tego urządzenia' }).click();
+
+  // One tap is not enough: the card is the only copy (E-06).
+  const confirm = page.getByTestId('confirm-remove');
+  await expect(confirm).toContainText('nie da się jej przywrócić');
+  await expect(page.getByRole('button', { name: 'Zostaw kartę' })).toBeFocused();
+  expect(await storedToken(page)).toBe(token);
+
+  await confirm.getByRole('button', { name: 'Tak, usuń kartę' }).click();
   await expect(page.getByRole('button', { name: 'Załóż kartę' })).toBeVisible();
   expect(await storedToken(page)).toBeNull();
+});
+
+test('changing your mind keeps the card', async ({ page }) => {
+  const token = newToken();
+  await preloadCard(page, token);
+  await page.goto('/pl/card/');
+
+  await page.getByRole('button', { name: 'Usuń kartę z tego urządzenia' }).click();
+  await page.getByRole('button', { name: 'Zostaw kartę' }).click();
+  await expect(page.getByTestId('confirm-remove')).toHaveCount(0);
+  expect(await storedToken(page)).toBe(token);
+});
+
+test('a 404 that is not CARD_NOT_FOUND never offers to remove the card (M4)', async ({ page }) => {
+  // E.g. a wrong API URL or a proxy error page: the card itself is fine.
+  const card = api.addCard({ stampProgress: 3 });
+  await preloadCard(page, card.token, { stampProgress: 3, rewardsAvailable: 0 });
+  api.fail('GET', /\/cards\/self$/, 404, 1);
+  await page.goto('/pl/card/');
+
+  await expect(page.getByText('Nie udało się odświeżyć karty')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Nie znaleźliśmy tej karty' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Usuń kartę z tego urządzenia' })).toHaveCount(0);
+  expect(await storedToken(page)).toBe(card.token);
 });
 
 test('the card page has no serious accessibility violations', async ({ page }) => {

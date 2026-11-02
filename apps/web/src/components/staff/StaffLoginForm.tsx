@@ -35,7 +35,7 @@ export function StaffLoginForm({ onLogin, expired, t }: StaffLoginFormProps) {
         ? interpolate(t.errors.accountLocked, { minutes: String(failure.minutes) })
         : failure.kind === 'rateLimited'
           ? t.errors.rateLimited
-          : t.errors.network;
+          : t.errors.offline;
 
   return (
     <form onSubmit={(e) => void submit(e)} className="mx-auto max-w-md rounded-(--radius-card) bg-cream-50 p-6 ring-1 ring-espresso-900/5 sm:p-8">
